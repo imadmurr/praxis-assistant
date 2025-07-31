@@ -5,16 +5,30 @@ import { motion } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { User, MessageSquare, ArrowRight } from 'lucide-react'
+import '../index.css'
 
-const STORAGE_KEY = 'praxis_chat_history'
-
+// Helper to decode JWT (without verifying signature) and extract payload
+function parseJwt(token) {
+    if (!token) return null
+    try {
+        const base64Url = token.split('.')[1]
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
+        const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
+        }).join(''))
+        return JSON.parse(jsonPayload)
+        // eslint-disable-next-line no-unused-vars
+    } catch (e) {
+        return null
+    }
+}
 /**
  * ChatWidget
  * - Renders a scrollable chat interface
  * - Persists history in sessionStorage
  * - Handles user input, loading state, and errors
  */
-export default function ChatWidget() {
+export default function ChatWidget({ token })  {
     // Load saved messages or start with a welcome bot message
     const [messages, setMessages] = useState(() => {
         try {
@@ -41,7 +55,14 @@ export default function ChatWidget() {
     const [loading, setLoading] = useState(false)
     const [error, setError]     = useState(null)
     // Ref for auto-scrolling to the latest message
-    const endRef                = useRef(null)
+    const endRef     = useRef(null)
+    // Extract user id (e.g., "sub" claim) from JWT
+    const userId = React.useMemo(() => {
+        const payload = parseJwt(token)
+        return payload?.sub || "unknown"
+    }, [token])
+
+    const STORAGE_KEY = `praxis_chat_history_${userId}`
 
     // Whenever messages or loading changes, scroll to bottom
     useEffect(() => {
@@ -91,7 +112,10 @@ export default function ChatWidget() {
         try {
             const res = await fetch('/chat', {
                 method:  'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body:    JSON.stringify({ history: historyPayload })
             })
             if (!res.ok) throw new Error(await res.text())
@@ -122,6 +146,10 @@ export default function ChatWidget() {
 
     return (
         <div className="max-w-md w-full p-6 bg-card rounded-2xl shadow-lg flex flex-col h-[600px]">
+            {/* Custom greeting */}
+            <div className="mb-3 font-medium text-gray-700">
+                Welcome, <span className="text-primary">{userId}</span>!
+            </div>
             {/* Error banner */}
             {error && (
                 <div className="bg-red-100 border border-red-300 text-red-800 px-4 py-2 rounded mb-2 flex justify-between items-center">
@@ -145,8 +173,10 @@ export default function ChatWidget() {
                         <div className="flex items-start space-x-3">
                             {/* Avatar */}
                             <div className={`p-2 rounded-full ${
-                                m.sender === 'user' ? 'bg-chart-1' : 'bg-chart-4'
-                            } text-card-foreground`}>
+                                m.sender === 'user'
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'bg-secondary text-secondary-foreground'}`}>
+
                                 {m.sender === 'user' ? <User size={16}/> : <MessageSquare size={16}/>}
                             </div>
                             {/* Message bubble (markdown for bot) */}
