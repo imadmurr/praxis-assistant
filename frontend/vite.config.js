@@ -11,13 +11,14 @@ export default defineConfig({
       '/chat': {
         target: 'http://127.0.0.1:5000',
         changeOrigin: true,
-        // you *don't* need rewrite since path is identical
       },
-      // forward any request from /chat → http://localhost:5000/chat
       '/login': {
+        target: 'http://localhost:5001',
+        changeOrigin: true,
+      },
+      '/history': {
         target: 'http://127.0.0.1:5000',
         changeOrigin: true,
-        // you *don't* need rewrite since path is identical
       },
     }
   }
