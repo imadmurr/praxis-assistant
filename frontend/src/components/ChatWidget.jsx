@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { User, MessageSquare, ArrowRight } from 'lucide-react'
 import '../index.css'
+import {BACKEND_URL} from "../.lib/api.js";
 
 // Helper to decode JWT (without verifying signature) and extract payload
 function parseJwt(token) {
@@ -46,7 +47,7 @@ export default function ChatWidget({ token }) {
         console.log('🔄 Fetching history with token:', token)
         setLoading(true)
 
-        fetch('/history', {
+        fetch(`${BACKEND_URL}/history`, {
             headers: { Authorization: `Bearer ${token}` }
         })
             .then(res => {
@@ -101,7 +102,7 @@ export default function ChatWidget({ token }) {
         }))
 
         try {
-            const res = await fetch('/chat', {
+            const res = await fetch(`${BACKEND_URL}/chat`, {
                 method:  'POST',
                 headers: {
                     'Content-Type':  'application/json',

@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import {AUTH_URL} from "../.lib/api.js";
 
 export default function LoginForm({ onLogin }) {
     const [username, setUsername] = useState("")
@@ -7,7 +8,7 @@ export default function LoginForm({ onLogin }) {
         setError(null)
         if (!username) return setError("Enter a username")
         try {
-            const res = await fetch('/login', {
+            const res = await fetch(`${AUTH_URL}/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username })

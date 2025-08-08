@@ -1,0 +1,50 @@
+services:
+  auth:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile   # or reference a dedicated Dockerfile
+    command: ["gunicorn", "--bind", "0.0.0.0:5000", "auth_app:auth_app"]
+    ports:
+      - "5001:5000"                    # map container 5000 → host 5001
+    environment:
+      MONGO_URI: mongodb://mongo:27017/chat_db
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: HS256
+    depends_on:
+      - mongo
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      MONGO_URI: mongodb://mongo:27017/chat_db
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: HS256
+    ports:
+      - "5003:5000"
+    depends_on:
+      - mongo
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    volumes:
+      - /Users/imad/Documents/Coding/praxis-assistant/frontend/nginx.conf
+
+  mongo:
+    image: mongo:7.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:
