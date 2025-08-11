@@ -52,6 +52,16 @@ client = genai.Client()
 app = Flask(__name__, static_folder="../ui", static_url_path="")
 app.logger.setLevel(logging.DEBUG)
 
+ALLOWED_ORIGIN = os.getenv('ALLOWED_ORIGIN', '*')
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin']  = ALLOWED_ORIGIN
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
+    return response
+
+
 # ── JWT Decorator ────────────────────────────────────────────────────────────
 
 def jwt_required(fn):

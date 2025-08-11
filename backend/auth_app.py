@@ -24,7 +24,14 @@ users.create_index("username", unique=True)
 
 auth_app = Flask(__name__)
 
+ALLOWED_ORIGIN = os.getenv('ALLOWED_ORIGIN', '*')
 
+@auth_app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin']  = ALLOWED_ORIGIN
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
+    return response
 
 @auth_app.route('/login', methods=['POST'])
 def login():
