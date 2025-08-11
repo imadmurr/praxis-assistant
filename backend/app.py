@@ -6,7 +6,7 @@ import os
 import jwt
 from jwt import ExpiredSignatureError, InvalidTokenError
 from pymongo import MongoClient
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import Flask, jsonify, request
 from dotenv import load_dotenv
 from functools import wraps
@@ -169,10 +169,10 @@ def chat():
 
         # 5) Persist both messages
         if last_user:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             insert_docs = [
                 {"user_id": str(user_id), "role": "user",      "content": last_user,   "time": now},
-                {"user_id": str(user_id), "role": "assistant", "content": reply_text, "time": datetime.utcnow()}
+                {"user_id": str(user_id), "role": "assistant", "content": reply_text, "time": datetime.now(timezone.utc)}
             ]
             messages_collection.insert_many(insert_docs)
             app.logger.debug(f"[chat] persisted {len(insert_docs)} messages")

@@ -9,9 +9,9 @@ purpose of separating this login logic from the main chat backend is to
 reflect a production architecture where authentication is handled by a
 dedicated service or identity provider.
 """
-import datetime
 import os
 import random
+from datetime import datetime, timezone
 from flask import Flask, request, jsonify
 from pymongo import MongoClient
 
@@ -48,7 +48,7 @@ def login():
         users.insert_one({
             "username": username,
             "user_id":  user_id,
-            "created_at": datetime.utcnow()
+            "created_at": datetime.now(timezone.utc)
         })
 
     token = create_jwt(user_id=user_id, username=username)  # create_jwt should set sub=str(user_id)
