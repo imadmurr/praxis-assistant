@@ -33,8 +33,10 @@ def add_cors_headers(response):
     response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
     return response
 
-@auth_app.route('/login', methods=['POST'])
+@auth_app.route('/login', methods=['POST',"OPTIONS"])
 def login():
+    if request.method == "OPTIONS":
+        return ("", 204)
     data = request.get_json(silent=True) or {}
     username = (data.get("username") or "").strip().lower()
     if not username:

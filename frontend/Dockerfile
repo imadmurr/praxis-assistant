@@ -2,6 +2,11 @@
 ### Stage 1: build the React app
 FROM node:20-alpine AS build
 WORKDIR /app
+# Inject Vite envs at build time
+ARG VITE_AUTH_URL
+ARG VITE_BACKEND_URL
+ENV VITE_AUTH_URL=$VITE_AUTH_URL
+ENV VITE_BACKEND_URL=$VITE_BACKEND_URL
 # install dependencies (copied separately to leverage cache)
 COPY frontend/package*.json ./
 RUN npm ci

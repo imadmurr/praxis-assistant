@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import {AUTH_URL} from "../.lib/api.js";
+import {AUTH_URL} from "../lib/api.js";
+
 
 export default function LoginForm({ onLogin }) {
     const [username, setUsername] = useState("")

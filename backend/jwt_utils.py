@@ -2,14 +2,14 @@
 
 import os
 import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "fallback_insecure_key")
 ALGORITHM  = os.getenv("JWT_ALGORITHM", "HS256")
 
-def create_jwt(user_id, username, exp_minutes=60):
+def create_jwt(user_id, username, exp_minutes=1320):
     """
     Create a JSON Web Token for the given user.
 
@@ -33,7 +33,7 @@ def create_jwt(user_id, username, exp_minutes=60):
     str
         The encoded JWT as a compact URL-safe string.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
         "username": username,

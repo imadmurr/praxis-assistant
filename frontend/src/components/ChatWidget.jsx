@@ -6,7 +6,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { User, MessageSquare, ArrowRight } from 'lucide-react'
 import '../index.css'
-import {BACKEND_URL} from "../.lib/api.js";
+import {BACKEND_URL} from "../lib/api.js";
 
 // Helper to decode JWT (without verifying signature) and extract payload
 function parseJwt(token) {
