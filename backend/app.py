@@ -68,8 +68,8 @@ def jwt_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         # Allow preflight to pass without a token
-        if request.method == "OPTIONS":
-            return ("", 204)
+        if request.method == 'OPTIONS':
+            return ('', 204)
         auth = request.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
             app.logger.error("[jwt] Missing/invalid Authorization header")
@@ -107,11 +107,11 @@ def home():
     return app.send_static_file("index.html")
 
 
-@app.route("/history", methods=["GET","OPTIONS"])
+@app.route("/history", methods=["GET",'OPTIONS'])
 @jwt_required
 def history():
-    if request.method == "OPTIONS":
-        return ("", 204)
+    if request.method == 'OPTIONS':
+        return ('', 204)
     uid = str(request.user_id)
     cursor = messages_collection.find({"user_id": uid}).sort("time", 1)
 
@@ -127,11 +127,11 @@ def history():
     return jsonify({"messages": history})
 
 
-@app.route("/chat", methods=["POST","OPTIONS"])
+@app.route("/chat", methods=["POST",'OPTIONS'])
 @jwt_required
 def chat():
-    if request.method == "OPTIONS":
-        return ("", 204)
+    if request.method == 'OPTIONS':
+        return ('', 204)
 
     user_id = request.user_id
     app.logger.info(f"[chat] user_id={user_id} called /chat")
