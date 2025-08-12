@@ -50,7 +50,6 @@ client = genai.Client()
 # ── Flask App & Logging ───────────────────────────────────────────────────────
 
 app = Flask(__name__, static_folder="../ui", static_url_path="")
-app.logger.setLevel(logging.DEBUG)
 
 ALLOWED_ORIGIN = os.getenv('ALLOWED_ORIGIN', '*')
 
@@ -72,18 +71,14 @@ def jwt_required(fn):
             return ('', 204)
         auth = request.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
-            app.logger.error("[jwt] Missing/invalid Authorization header")
             return jsonify({"error": "Missing/invalid token"}), 401
 
         token = auth.split(" ", 1)[1]
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            app.logger.debug(f"[jwt] ✅ payload: {payload}")
         except ExpiredSignatureError as e:
-            app.logger.error(f"[jwt] ❌ expired token: {e}")
             return jsonify({"error": "Invalid or expired token"}), 401
         except InvalidTokenError as e:
-            app.logger.error(f"[jwt] ❌ invalid token: {e}")
             return jsonify({"error": "Invalid or expired token"}), 401
 
         # Attach user info to the request context
@@ -97,7 +92,6 @@ def jwt_required(fn):
 @app.errorhandler(Exception)
 def handle_unexpected_error(e):
     # catch any unhandled exception anywhere in the app
-    app.logger.exception(f"[error] Unhandled error during {request.method} {request.path}")
     return jsonify({"error": "Internal server error"}), 500
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -122,8 +116,6 @@ def history():
             "text":   doc["content"],
             "time":   doc["time"].isoformat()
         })
-
-    app.logger.debug(f"[history] returning {len(history)} messages")
     return jsonify({"messages": history})
 
 
@@ -134,10 +126,8 @@ def chat():
         return ('', 204)
 
     user_id = request.user_id
-    app.logger.info(f"[chat] user_id={user_id} called /chat")
     try:
         data = request.get_json(force=True)
-        app.logger.debug(f"[chat] payload: {data}")
         history = data.get("history", [])
 
         # 1) Extract the latest user message
@@ -145,11 +135,9 @@ def chat():
             (turn["content"] for turn in reversed(history) if turn["role"] == "user"),
             ""
         )
-        app.logger.debug(f"[chat] last_user=\"{last_user}\"")
 
         # 2) Retrieve top-k doc snippets
         docs = retrieve_relevant(last_user, k=3)
-        app.logger.debug(f"[chat] retrieved {len(docs)} docs")
         context = "\n\n".join(docs)
 
         # 3) Build the prompt parts
@@ -163,7 +151,6 @@ def chat():
         parts.append(types.Part.from_text(text="Assistant:"))
 
         # 4) Call Gemini
-        app.logger.info(f"[chat] sending request to Gemini model={MODEL_NAME}")
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=parts,
@@ -173,7 +160,6 @@ def chat():
             )
         )
         reply_text = response.text.strip()
-        app.logger.debug(f"[chat] Gemini replied: \"{reply_text}\"")
 
         # 5) Persist both messages
         if last_user:
@@ -183,12 +169,10 @@ def chat():
                 {"user_id": str(user_id), "role": "assistant", "content": reply_text, "time": datetime.now(timezone.utc)}
             ]
             messages_collection.insert_many(insert_docs)
-            app.logger.debug(f"[chat] persisted {len(insert_docs)} messages")
 
         return jsonify({"reply": reply_text})
 
     except Exception:
-        app.logger.exception(f"[chat] Error handling /chat for user_id={user_id}")
         return jsonify({"error": "Failed to process chat"}), 500
 
 

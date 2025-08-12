@@ -14,7 +14,6 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       JWT_ALGORITHM: HS256
-
     depends_on:
       - mongo
 

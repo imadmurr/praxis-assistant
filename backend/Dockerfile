@@ -22,4 +22,4 @@ PORT=5000
 # expose port 5000 for the Flask app
 EXPOSE 5000
 # default command (use gunicorn in production for better performance)
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT} app:app"]
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:$PORT app:app --workers 1 --threads 2 --worker-class gthread --timeout 120 --max-requests 50 --max-requests-jitter 10"]
