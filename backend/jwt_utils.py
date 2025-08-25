@@ -1,75 +1,91 @@
 # backend/jwt_utils.py
+"""
+JWT utilities for Praxis Assistant (HS256).
+- Verifies Authorization: Bearer <token> on protected routes.
+- Extracts user_id from the 'sub' claim and stores it in flask.g.user_id.
+- Postpones issuer/audience checks until Praxis shares final values.
+
+Environment:
+  JWT_SECRET_KEY  -> HS256 shared secret used to verify the token signature.
+"""
+
+from __future__ import annotations
 
 import os
+import functools
+from typing import Optional, Dict, Any
+
 import jwt
-from datetime import datetime, timedelta, timezone
-from dotenv import load_dotenv
-from typing import Optional, Dict
+from flask import request, g, abort
 
-load_dotenv()
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "fallback_insecure_key")
-ALGORITHM  = os.getenv("JWT_ALGORITHM", "HS256")
 
-def create_jwt(user_id, username, exp_minutes=1320):
+def _require_secret() -> str:
     """
-    Create a JSON Web Token for the given user.
-
-    Parameters
-    ----------
-    user_id : str | int
-        Unique user identifier. Will be stored under the `sub` claim.
-    username : str
-        Human-friendly username.
-    exp_minutes : int
-        Expiration in minutes (default ~22h).
-
-    Returns
-    -------
-    str
-        Signed JWT string.
+    Read the HS256 secret at call-time (not import-time) to avoid
+    'secret not set' issues when env gets loaded after imports.
     """
-    now = datetime.now(timezone.utc)
-    payload = {
-        "sub": str(user_id),
-        "username": username,
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=exp_minutes)).timestamp()),
-    }
-    token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-    # PyJWT>=2 returns str for non-rsa; keep it as-is
-    return token
+    secret = os.getenv("JWT_SECRET_KEY")
+    if not secret:
+        raise RuntimeError(
+            "JWT_SECRET_KEY is not set. "
+            "Set it in your environment/config before handling JWTs."
+        )
+    return secret
 
-def verify_jwt(token: str) -> Optional[Dict]:
+
+def get_bearer_token() -> Optional[str]:
+    """Read the Bearer token from the Authorization header."""
+    auth = request.headers.get("Authorization", "")
+    if not auth or not auth.startswith("Bearer "):
+        return None
+    return auth.split(" ", 1)[1].strip()
+
+
+def decode_jwt(token: str) -> Dict[str, Any]:
     """
-    Verify a JWT and return its payload if valid, otherwise None.
-
-    Parameters
-    ----------
-    token : str
-        The JWT as a compact JWS string.
-
-    Returns
-    -------
-    dict | None
-        The decoded payload if the token is valid, otherwise `None`.
-        The payload will include at least the `sub` claim and may
-        include additional fields such as `username`.
+    Decode and verify an HS256 JWT.
+    - Requires 'exp' by default.
+    - Does NOT enforce 'iss' or 'aud' yet (postponed by request).
     """
+    secret = _require_secret()
     try:
-        # Important: `algorithms` expects a list
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(
+            token,
+            secret,
+            algorithms=["HS256"],
+            options={"require": ["exp"]},
+        )
         return payload
     except jwt.ExpiredSignatureError:
-        return None
+        abort(401, description="Token expired.")
     except jwt.InvalidTokenError:
-        return None
+        abort(401, description="Invalid token.")
 
-def extract_bearer(auth_header: str) -> Optional[str]:
+
+def require_jwt(fn):
     """
-    Given an Authorization header value, return the JWT if present.
+    Decorator that:
+    - Extracts and verifies the Bearer token.
+    - Puts user id from 'sub' into g.user_id.
+    - Also exposes the full payload on g.jwt_payload (optional use).
     """
-    if not auth_header or not isinstance(auth_header, str):
-        return None
-    if not auth_header.startswith("Bearer "):
-        return None
-    return auth_header.split(" ", 1)[1].strip() or None
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        token = get_bearer_token()
+        if not token:
+            abort(401, description="Missing Authorization: Bearer token.")
+        payload = decode_jwt(token)
+
+        user_id = payload.get("sub")
+        if not user_id:
+            abort(401, description="Token is missing 'sub' (user id).")
+
+        g.user_id = str(user_id)
+        g.jwt_payload = payload
+        return fn(*args, **kwargs)
+    return wrapper
+
+
+def current_user_id() -> Optional[str]:
+    """Convenience accessor for the user id stored by @require_jwt."""
+    return getattr(g, "user_id", None)
