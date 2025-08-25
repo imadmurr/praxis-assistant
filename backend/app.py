@@ -11,6 +11,7 @@ from flask import Flask, jsonify, request
 from dotenv import load_dotenv
 from functools import wraps
 
+from jwt_utils import verify_jwt
 from retrieval import retrieve_relevant
 from google import genai
 from google.genai import types
@@ -63,28 +64,53 @@ def add_cors_headers(response):
 
 # ── JWT Decorator ────────────────────────────────────────────────────────────
 
-def jwt_required(fn):
-    @wraps(fn)
+def jwt_required(f):
+    @wraps(f)
     def wrapper(*args, **kwargs):
-        # Allow preflight to pass without a token
-        if request.method == 'OPTIONS':
-            return ('', 204)
+        # 1) Try Authorization: Bearer <token>
         auth = request.headers.get("Authorization", "")
-        if not auth.startswith("Bearer "):
-            return jsonify({"error": "Missing/invalid token"}), 401
+        token = None
+        if auth.startswith("Bearer "):
+            token = auth.split(" ", 1)[1].strip()
+        # 2) Fallback: Cookie named "jwt" (useful if upstream sets HttpOnly cookie)
+        if not token:
+            token = request.cookies.get("jwt")
+        if not token:
+            # If HTML is acceptable, return a simple page; otherwise JSON 401
+            accept = request.headers.get("Accept", "")
+            if "text/html" in accept and "application/json" not in accept:
+                return (
+                    "<!doctype html><title>401 Unauthorized</title>"
+                    "<h1>401 – Not authorized</h1>"
+                    "<p>This endpoint requires a valid JWT in the Authorization header.</p>",
+                    401,
+                    {"Content-Type": "text/html"},
+                )
+            return jsonify({"error": "Missing token"}), 401
 
-        token = auth.split(" ", 1)[1]
+        payload = verify_jwt(token)
+        if not payload:
+            accept = request.headers.get("Accept", "")
+            if "text/html" in accept and "application/json" not in accept:
+                return (
+                    "<!doctype html><title>401 Unauthorized</title>"
+                    "<h1>401 – Invalid or expired token</h1>",
+                    401,
+                    {"Content-Type": "text/html"},
+                )
+            return jsonify({"error": "Invalid or expired token"}), 401
+
+        # Attach both a dict and convenience attributes for compatibility
+        request.user = {"id": payload.get("sub"), "username": payload.get("username")}
         try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        except ExpiredSignatureError as e:
-            return jsonify({"error": "Invalid or expired token"}), 401
-        except InvalidTokenError as e:
-            return jsonify({"error": "Invalid or expired token"}), 401
+            request.user_id = payload.get("sub")
+            request.username = payload.get("username")
+        except Exception:
+            # In some Flask setups request is a LocalProxy; setting attributes is fine,
+            # but if an environment disallows it we just rely on request.user
+            pass
 
-        # Attach user info to the request context
-        request.user_id  = int(payload["sub"])
-        request.username = payload.get("username")
-        return fn(*args, **kwargs)
+        return f(*args, **kwargs)
     return wrapper
 
 # ── Error Handler ────────────────────────────────────────────────────────────

@@ -51,8 +51,13 @@ export default function ChatWidget({ token }) {
             headers: { Authorization: `Bearer ${token}` }
         })
             .then(res => {
-                if (!res.ok) throw new Error(`Status ${res.status}`)
-                return res.json()
+                if (res.status === 401) {
+                    localStorage.removeItem('jwt_token');
+                    window.location.reload();   // App sees no token and shows LoginForm
+                    return;                     // stop here
+                }
+                if (!res.ok) throw new Error(`Status ${res.status}`);
+                return res.json();
             })
             .then(data => {
                 console.log('📨 /history response JSON:', data)
@@ -110,7 +115,12 @@ export default function ChatWidget({ token }) {
                 },
                 body: JSON.stringify({ history: historyPayload })
             })
-            if (!res.ok) throw new Error(await res.text())
+            if (res.status === 401) {
+                localStorage.removeItem('jwt_token');
+                window.location.reload();       // kicks back to LoginForm
+                return;
+            }
+            if (!res.ok) throw new Error(await res.text());
             const { reply } = await res.json()
 
             setMessages(ms => [

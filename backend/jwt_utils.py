@@ -4,6 +4,7 @@ import os
 import jwt
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
+from typing import Optional, Dict
 
 load_dotenv()
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "fallback_insecure_key")
@@ -15,41 +16,37 @@ def create_jwt(user_id, username, exp_minutes=1320):
 
     Parameters
     ----------
-    user_id : int or str
-        A unique identifier for the user. This will be stored in the
-        `sub` (subject) claim of the JWT. Using an integer ID makes
-        it harder to guess a user's identity and decouples the token
-        payload from the user's login name.
-    username : str, optional
-        The human-readable login name or email address associated with
-        the user. If provided, it will be stored in the `username`
-        claim of the token. This allows backends or UIs to display
-        friendly names without embedding them in the subject claim.
-    exp_minutes : int, optional
-        How many minutes from now the token should remain valid.
+    user_id : str | int
+        Unique user identifier. Will be stored under the `sub` claim.
+    username : str
+        Human-friendly username.
+    exp_minutes : int
+        Expiration in minutes (default ~22h).
 
     Returns
     -------
     str
-        The encoded JWT as a compact URL-safe string.
+        Signed JWT string.
     """
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
         "username": username,
-        "iat": now,
-        "exp": now + timedelta(minutes=exp_minutes)
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=exp_minutes)).timestamp()),
     }
-    return jwt.encode(payload=payload, key=SECRET_KEY, algorithm=ALGORITHM)
+    token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+    # PyJWT>=2 returns str for non-rsa; keep it as-is
+    return token
 
-def verify_jwt(token):
+def verify_jwt(token: str) -> Optional[Dict]:
     """
-    Decode and validate a JWT.
+    Verify a JWT and return its payload if valid, otherwise None.
 
     Parameters
     ----------
     token : str
-        The encoded JWT provided by the client.
+        The JWT as a compact JWS string.
 
     Returns
     -------
@@ -59,9 +56,20 @@ def verify_jwt(token):
         include additional fields such as `username`.
     """
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithm=ALGORITHM)
+        # Important: `algorithms` expects a list
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
     except jwt.ExpiredSignatureError:
         return None
     except jwt.InvalidTokenError:
         return None
+
+def extract_bearer(auth_header: str) -> Optional[str]:
+    """
+    Given an Authorization header value, return the JWT if present.
+    """
+    if not auth_header or not isinstance(auth_header, str):
+        return None
+    if not auth_header.startswith("Bearer "):
+        return None
+    return auth_header.split(" ", 1)[1].strip() or None

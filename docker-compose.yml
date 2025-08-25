@@ -1,21 +1,10 @@
 services:
-  auth:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile   # or reference a dedicated Dockerfile
-      args:
-        VITE_AUTH_URL: http://localhost:5001
-        VITE_BACKEND_URL: http://localhost:5003
-    command: ["gunicorn", "--bind", "0.0.0.0:5000", "auth_app:auth_app"]
+  mongo:
+    image: mongo:7.0
     ports:
-      - "5001:5000"                    # map container 5000 → host 5001
-    environment:
-      MONGO_URI: mongodb://mongo:27017/chat_db
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
-      JWT_ALGORITHM: HS256
-    depends_on:
-      - mongo
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
 
   backend:
     build:
@@ -26,28 +15,42 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       JWT_ALGORITHM: HS256
-    ports:
-      - "5003:5000"
+      PORT: 5000
     depends_on:
       - mongo
+    ports:
+      - "5003:5000"   # host:container
+    command: ["gunicorn", "--bind", "0.0.0.0:5000", "app:app", "--workers", "1", "--threads", "8", "--timeout", "120"]
+
+  # Optional: token minting helper for dev
+  auth:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      MONGO_URI: mongodb://mongo:27017/chat_db
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: HS256
+      PORT: 5000
+    depends_on:
+      - mongo
+    ports:
+      - "5001:5000"
+    command: ["gunicorn", "--bind", "0.0.0.0:5000", "auth_app:auth_app", "--workers", "1", "--threads", "4", "--timeout", "60"]
 
   frontend:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-    ports:
-      - "80:80"
+      args:
+        # IMPORTANT: bake same-origin API base into the bundle
+        VITE_BACKEND_URL: /api
     depends_on:
       - backend
-    volumes:
-      - /Users/imad/Documents/Coding/praxis-assistant/frontend/nginx.conf
-
-  mongo:
-    image: mongo:7.0
     ports:
-      - "27017:27017"
+      - "80:80"
     volumes:
-      - mongo_data:/data/db
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
 
 volumes:
   mongo_data:
