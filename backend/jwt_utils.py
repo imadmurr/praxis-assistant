@@ -62,6 +62,15 @@ def decode_jwt(token: str) -> Dict[str, Any]:
         abort(401, description="Invalid token.")
 
 
+# Back-compat helper: some existing code imports verify_jwt()
+def verify_jwt(token: str) -> Dict[str, Any]:
+    """
+    Backward-compatible wrapper used by existing app.py.
+    Returns the decoded payload (raises/aborts on failure).
+    """
+    return decode_jwt(token)
+
+
 def require_jwt(fn):
     """
     Decorator that:

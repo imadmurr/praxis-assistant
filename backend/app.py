@@ -7,11 +7,12 @@ import jwt
 from jwt import ExpiredSignatureError, InvalidTokenError
 from pymongo import MongoClient
 from datetime import datetime, timezone
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, g
 from dotenv import load_dotenv
 from functools import wraps
 
-from jwt_utils import verify_jwt
+from chat_routes import chat_bp
+from jwt_utils import verify_jwt, require_jwt
 from retrieval import retrieve_relevant
 from google import genai
 from google.genai import types
@@ -51,7 +52,8 @@ client = genai.Client()
 # ── Flask App & Logging ───────────────────────────────────────────────────────
 
 app = Flask(__name__, static_folder="../ui", static_url_path="")
-
+# Register Chats API blueprint
+app.register_blueprint(chat_bp, url_prefix="/api")
 ALLOWED_ORIGIN = os.getenv('ALLOWED_ORIGIN', '*')
 
 @app.after_request
@@ -201,6 +203,14 @@ def chat():
     except Exception:
         return jsonify({"error": "Failed to process chat"}), 500
 
+@app.get("/api/me")
+@require_jwt
+def whoami():
+    # Returns the authenticated user id and full JWT payload (helpful while testing)
+    return jsonify({
+        "user_id": g.user_id,
+        "claims": getattr(g, "jwt_payload", {})
+    }), 200
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
