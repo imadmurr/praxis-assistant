@@ -1,37 +1,88 @@
 # backend/app.py
+from __future__ import annotations
 
-import logging
 import os
-
-import jwt
-from jwt import ExpiredSignatureError, InvalidTokenError
-from pymongo import MongoClient
 from datetime import datetime, timezone
-from flask import Flask, jsonify, request, g
-from dotenv import load_dotenv
-from functools import wraps
+from typing import Any, Dict, List, Optional
 
-from chat_routes import chat_bp
-from jwt_utils import verify_jwt, require_jwt
-from retrieval import retrieve_relevant
+from flask import Flask, request, jsonify, g
+
+# ---- Local imports (run-from-backend friendly) ----
+try:
+    from jwt_utils import require_jwt
+    from db import chats, messages
+    from chat_routes import chat_bp
+    import retrieval  # your RAG module
+except Exception:
+    # package-style fallback (if you run app as a package)
+    from backend.jwt_utils import require_jwt  # type: ignore
+    from backend.db import chats, messages     # type: ignore
+    from backend.chat_routes import chat_bp    # type: ignore
+    from backend import retrieval              # type: ignore
+
+# ---- Google GenAI client ----
 from google import genai
 from google.genai import types
 
-# ── Environment & Clients ────────────────────────────────────────────────────
+app = Flask(__name__)
 
-load_dotenv()
+# Register Chats API blueprint
+app.register_blueprint(chat_bp, url_prefix="/api")
 
-MONGO_URI            = os.getenv("MONGO_URI", "mongodb://mongo:27017")
-mongo_client         = MongoClient(MONGO_URI)
-db                   = mongo_client["chat_db"]
-messages_collection  = db["messages"]
+# ---------- Small helpers ----------
 
-API_KEY    = os.getenv("GEMINI_API_KEY")
-if not API_KEY:
-    raise RuntimeError("GEMINI_API_KEY missing")
+def _now_utc_naive() -> datetime:
+    return datetime.utcnow()
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-ALGORITHM  = os.getenv("JWT_ALGORITHM", "HS256")
+def _to_iso_z(dt: datetime) -> str:
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    # Keep milliseconds for consistency with /api
+    return dt.isoformat(timespec="milliseconds") + "Z"
+
+def _require_nonempty_text(text: Optional[str], field_name: str = "content", max_len: int = 8000) -> str:
+    if not isinstance(text, str):
+        return ""
+    clean = text.strip()
+    if not clean or len(clean) > max_len:
+        return ""
+    return clean
+
+def _get_or_create_default_chat(user_id: str) -> Dict[str, Any]:
+    """
+    Bridge for legacy /chat and /history: use one 'default' chat per user.
+    Strategy:
+      1) If a chat with is_default=True exists -> use it.
+      2) Else reuse the most recently updated chat (if any) and mark it default.
+      3) Else create a fresh default chat.
+    """
+    doc = chats.find_one({"user_id": user_id, "archived": {"$ne": True}, "is_default": True})
+    if doc:
+        return doc
+
+    existing = chats.find({"user_id": user_id, "archived": {"$ne": True}}).sort("updated_at", -1).limit(1)
+    if existing:
+        doc = list(existing)
+        if doc:
+            chat = doc[0]
+            chats.update_one({"_id": chat["_id"]}, {"$set": {"is_default": True}})
+            chat["is_default"] = True
+            return chat
+
+    now = _now_utc_naive()
+    new_doc = {
+        "user_id": user_id,
+        "title": "Default",
+        "created_at": now,
+        "updated_at": now,
+        "archived": False,
+        "is_default": True,
+    }
+    ins = chats.insert_one(new_doc)
+    new_doc["_id"] = ins.inserted_id
+    return new_doc
+
+# ---------- AI generation ----------
 
 SYSTEM_INSTRUCTION = """You are the Praxis ERP AI Assistant.
 - Always answer clearly, concisely, and in complete sentences.
@@ -46,173 +97,145 @@ If you cannot confidently answer, reply:
 
 THINK_CFG  = types.ThinkingConfig(thinking_budget=-1)
 MODEL_NAME = "gemini-2.5-flash"
+_gen_client = genai.Client()
 
-client = genai.Client()
-
-# ── Flask App & Logging ───────────────────────────────────────────────────────
-
-app = Flask(__name__, static_folder="../ui", static_url_path="")
-# Register Chats API blueprint
-app.register_blueprint(chat_bp, url_prefix="/api")
-ALLOWED_ORIGIN = os.getenv('ALLOWED_ORIGIN', '*')
-
-@app.after_request
-def add_cors_headers(response):
-    response.headers['Access-Control-Allow-Origin']  = ALLOWED_ORIGIN
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
-    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
-    return response
-
-
-# ── JWT Decorator ────────────────────────────────────────────────────────────
-
-def jwt_required(f):
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        # 1) Try Authorization: Bearer <token>
-        auth = request.headers.get("Authorization", "")
-        token = None
-        if auth.startswith("Bearer "):
-            token = auth.split(" ", 1)[1].strip()
-        # 2) Fallback: Cookie named "jwt" (useful if upstream sets HttpOnly cookie)
-        if not token:
-            token = request.cookies.get("jwt")
-        if not token:
-            # If HTML is acceptable, return a simple page; otherwise JSON 401
-            accept = request.headers.get("Accept", "")
-            if "text/html" in accept and "application/json" not in accept:
-                return (
-                    "<!doctype html><title>401 Unauthorized</title>"
-                    "<h1>401 – Not authorized</h1>"
-                    "<p>This endpoint requires a valid JWT in the Authorization header.</p>",
-                    401,
-                    {"Content-Type": "text/html"},
-                )
-            return jsonify({"error": "Missing token"}), 401
-
-        payload = verify_jwt(token)
-        if not payload:
-            accept = request.headers.get("Accept", "")
-            if "text/html" in accept and "application/json" not in accept:
-                return (
-                    "<!doctype html><title>401 Unauthorized</title>"
-                    "<h1>401 – Invalid or expired token</h1>",
-                    401,
-                    {"Content-Type": "text/html"},
-                )
-            return jsonify({"error": "Invalid or expired token"}), 401
-
-        # Attach both a dict and convenience attributes for compatibility
-        request.user = {"id": payload.get("sub"), "username": payload.get("username")}
-        try:
-            request.user_id = payload.get("sub")
-            request.username = payload.get("username")
-        except Exception:
-            # In some Flask setups request is a LocalProxy; setting attributes is fine,
-            # but if an environment disallows it we just rely on request.user
-            pass
-
-        return f(*args, **kwargs)
-    return wrapper
-
-# ── Error Handler ────────────────────────────────────────────────────────────
-
-@app.errorhandler(Exception)
-def handle_unexpected_error(e):
-    # catch any unhandled exception anywhere in the app
-    return jsonify({"error": "Internal server error"}), 500
-
-# ── Routes ────────────────────────────────────────────────────────────────────
-
-@app.route("/")
-def home():
-    return app.send_static_file("index.html")
-
-
-@app.route("/history", methods=["GET",'OPTIONS'])
-@jwt_required
-def history():
-    if request.method == 'OPTIONS':
-        return ('', 204)
-    uid = str(request.user_id)
-    cursor = messages_collection.find({"user_id": uid}).sort("time", 1)
-
-    history = []
-    for doc in cursor:
-        history.append({
-            "sender": "user" if doc["role"] == "user" else "bot",
-            "text":   doc["content"],
-            "time":   doc["time"].isoformat()
-        })
-    return jsonify({"messages": history})
-
-
-@app.route("/chat", methods=["POST",'OPTIONS'])
-@jwt_required
-def chat():
-    if request.method == 'OPTIONS':
-        return ('', 204)
-
-    user_id = request.user_id
+def _generate_assistant_reply(latest_user_text: str, history: List[Dict[str, str]]) -> str:
+    # Use retrieval pipeline for context (reuse your retrieval module)
     try:
-        data = request.get_json(force=True)
-        history = data.get("history", [])
-
-        # 1) Extract the latest user message
-        last_user = next(
-            (turn["content"] for turn in reversed(history) if turn["role"] == "user"),
-            ""
-        )
-
-        # 2) Retrieve top-k doc snippets
-        docs = retrieve_relevant(last_user, k=3)
+        docs = retrieval.retrieve_relevant(latest_user_text, k=3)
         context = "\n\n".join(docs)
+    except Exception:
+        context = ""
 
-        # 3) Build the prompt parts
-        parts = [
-            types.Part.from_text(text=SYSTEM_INSTRUCTION),
-            types.Part.from_text(text="----\nRelevant Documentation:\n" + context),
-        ]
-        for turn in history:
-            prefix = "User:" if turn["role"] == "user" else "Assistant:"
-            parts.append(types.Part.from_text(text=f"{prefix} {turn['content']}"))
-        parts.append(types.Part.from_text(text="Assistant:"))
+    parts: List[types.Part] = [
+        types.Part.from_text(text=SYSTEM_INSTRUCTION),
+        types.Part.from_text(text="----\nRelevant Documentation:\n" + context),
+    ]
+    # Rebuild "User:" / "Assistant:" turn-taking for the LLM
+    for turn in history:
+        prefix = "User:" if turn.get("role") == "user" else "Assistant:"
+        parts.append(types.Part.from_text(text=f"{prefix} {turn.get('content','')}"))
+    parts.append(types.Part.from_text(text="Assistant:"))
 
-        # 4) Call Gemini
-        response = client.models.generate_content(
+    try:
+        response = _gen_client.models.generate_content(
             model=MODEL_NAME,
             contents=parts,
             config=types.GenerateContentConfig(
                 thinking_config=THINK_CFG,
-                response_mime_type="text/plain"
-            )
+                response_mime_type="text/plain",
+            ),
         )
-        reply_text = response.text.strip()
-
-        # 5) Persist both messages
-        if last_user:
-            now = datetime.now(timezone.utc)
-            insert_docs = [
-                {"user_id": str(user_id), "role": "user",      "content": last_user,   "time": now},
-                {"user_id": str(user_id), "role": "assistant", "content": reply_text, "time": datetime.now(timezone.utc)}
-            ]
-            messages_collection.insert_many(insert_docs)
-
-        return jsonify({"reply": reply_text})
-
+        return (response.text or "").strip()
     except Exception:
-        return jsonify({"error": "Failed to process chat"}), 500
+        return "I couldn't generate a response just now. Please try again."
+
+# ---------- Legacy-compatible endpoints (now unified on Mongo schema) ----------
+
+@app.get("/history")
+@require_jwt
+def history():
+    """
+    Returns chat history in the shape ChatWidget.jsx expects:
+      { "messages": [ { "sender": "user"|"bot", "text": str, "time": ISO } ] }
+    Data is read from the unified Mongo `messages` collection,
+    scoped to the user's default chat.
+    """
+    chat = _get_or_create_default_chat(g.user_id)
+    # oldest -> newest
+    cur = messages.find(
+        {"user_id": g.user_id, "chat_id": chat["_id"]},
+        projection={"role": 1, "content": 1, "created_at": 1},
+    ).sort("created_at", 1).limit(1000)
+
+    out = []
+    for m in cur:
+        sender = "user" if m.get("role") == "user" else "bot"
+        out.append({
+            "sender": sender,
+            "text":   m.get("content", ""),
+            "time":   _to_iso_z(m.get("created_at", _now_utc_naive())),
+        })
+
+    return jsonify({"messages": out}), 200
+
+
+@app.post("/chat")
+@require_jwt
+def chat():
+    """
+    Accepts: { "history": [ { "role": "user"|"assistant", "content": str }, ... ] }
+    Returns: { "reply": "<assistant text>" }
+    Behavior:
+      - Writes latest user message and assistant reply into unified Mongo schema
+        under the user's default chat.
+    """
+    body = request.get_json(silent=True) or {}
+    hist = body.get("history") or []
+
+    # Determine the latest user message (ChatWidget sends it as the last element)
+    latest_user_text = ""
+    if isinstance(hist, list) and hist:
+        last = hist[-1]
+        if isinstance(last, dict) and last.get("role") == "user":
+            latest_user_text = _require_nonempty_text(last.get("content") or "")
+    if not latest_user_text:
+        return jsonify({"error": "Missing latest user message."}), 400
+
+    chat_doc = _get_or_create_default_chat(g.user_id)
+    now = _now_utc_naive()
+
+    # Persist user message
+    user_msg = {
+        "user_id": g.user_id,
+        "chat_id": chat_doc["_id"],
+        "role": "user",
+        "content": latest_user_text,
+        "created_at": now,
+    }
+    messages.insert_one(user_msg)
+    chats.update_one({"_id": chat_doc["_id"]}, {"$set": {"updated_at": now}})
+
+    # Build small history window for the model (20 recent turns)
+    hist_cur = messages.find(
+        {"user_id": g.user_id, "chat_id": chat_doc["_id"]},
+        projection={"role": 1, "content": 1, "created_at": 1},
+    ).sort("created_at", -1).limit(20)
+    hist_docs = list(hist_cur)
+    hist_docs.reverse()
+    model_history = [{"role": d.get("role","user"), "content": d.get("content","")} for d in hist_docs]
+
+    # Generate reply
+    assistant_text = _generate_assistant_reply(latest_user_text, model_history)
+
+    # Persist assistant message
+    asst_doc = {
+        "user_id": g.user_id,
+        "chat_id": chat_doc["_id"],
+        "role": "assistant",
+        "content": assistant_text,
+        "created_at": _now_utc_naive(),
+    }
+    messages.insert_one(asst_doc)
+    chats.update_one({"_id": chat_doc["_id"]}, {"$set": {"updated_at": _now_utc_naive()}})
+
+    # Respond in legacy shape for ChatWidget.jsx
+    return jsonify({"reply": assistant_text}), 200
+
+
+# ---------- Utility endpoints ----------
 
 @app.get("/api/me")
 @require_jwt
 def whoami():
-    # Returns the authenticated user id and full JWT payload (helpful while testing)
-    return jsonify({
-        "user_id": g.user_id,
-        "claims": getattr(g, "jwt_payload", {})
-    }), 200
+    return jsonify({"user_id": g.user_id, "claims": getattr(g, "jwt_payload", {})}), 200
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+@app.get("/healthz")
+def healthz():
+    # You can enhance this to also ping Mongo if desired
+    return jsonify({"ok": True}), 200
+
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # Default dev port; in prod you'll run via gunicorn/uwsgi
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=os.getenv("FLASK_DEBUG", "0") == "1")
