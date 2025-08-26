@@ -6,7 +6,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { User, MessageSquare, ArrowRight } from 'lucide-react'
 import '../index.css'
-import {BACKEND_URL} from "../lib/api.js";
+import { BACKEND_URL } from '../lib/api.js'
 
 // Helper to decode JWT (without verifying signature) and extract payload
 function parseJwt(token) {
@@ -29,10 +29,13 @@ function parseJwt(token) {
 export default function ChatWidget({ token }) {
     // ── State & refs ─────────────────────────────────────────────────────────
     const [messages, setMessages] = useState([])
-    const [input, setInput]       = useState('')
-    const [loading, setLoading]   = useState(false)
-    const [error, setError]       = useState(null)
-    const endRef                  = useRef(null)
+    const [input, setInput] = useState('')
+    const [loading, setLoading] = useState(false)
+    const [error, setError] = useState(null)
+
+    const endRef = useRef(null)          // scroll anchor
+    const sendBtnRef = useRef(null)      // button ref (for ripple class)
+    const inputRef = useRef(null)        // input ref (optional focus, styling)
 
     // Extract user id from JWT
     const userId = React.useMemo(() => {
@@ -48,24 +51,25 @@ export default function ChatWidget({ token }) {
         setLoading(true)
 
         fetch(`${BACKEND_URL}/history`, {
-            headers: { Authorization: `Bearer ${token}` }
+            headers: { Authorization: `Bearer ${token}` },
         })
             .then(res => {
                 if (res.status === 401) {
-                    localStorage.removeItem('jwt_token');
-                    window.location.reload();   // App sees no token and shows LoginForm
-                    return;                     // stop here
+                    localStorage.removeItem('jwt_token')
+                    window.location.reload() // App sees no token and shows LoginForm
+                    return
                 }
-                if (!res.ok) throw new Error(`Status ${res.status}`);
-                return res.json();
+                if (!res.ok) throw new Error(`Status ${res.status}`)
+                return res.json()
             })
             .then(data => {
+                if (!data) return
                 console.log('📨 /history response JSON:', data)
                 const hist = Array.isArray(data.messages) ? data.messages : []
                 const parsed = hist.map(m => ({
                     sender: m.sender,
                     text: m.text,
-                    time:  new Date(m.time)
+                    time: new Date(m.time),
                 }))
                 setMessages(parsed)
             })
@@ -100,32 +104,34 @@ export default function ChatWidget({ token }) {
         setMessages(ms => [...ms, userMsg])
         setInput('')
         setLoading(true)
+        // optional: keep focus in the input after sending
+        inputRef.current?.focus()
 
         const historyPayload = [...messages, userMsg].map(m => ({
-            role:    m.sender === 'user' ? 'user' : 'assistant',
-            content: m.text
+            role: m.sender === 'user' ? 'user' : 'assistant',
+            content: m.text,
         }))
 
         try {
             const res = await fetch(`${BACKEND_URL}/chat`, {
-                method:  'POST',
+                method: 'POST',
                 headers: {
-                    'Content-Type':  'application/json',
-                    'Authorization': `Bearer ${token}`
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify({ history: historyPayload })
+                body: JSON.stringify({ history: historyPayload }),
             })
             if (res.status === 401) {
-                localStorage.removeItem('jwt_token');
-                window.location.reload();       // kicks back to LoginForm
-                return;
+                localStorage.removeItem('jwt_token')
+                window.location.reload() // kicks back to LoginForm
+                return
             }
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) throw new Error(await res.text())
             const { reply } = await res.json()
 
             setMessages(ms => [
                 ...ms,
-                { sender: 'bot', text: reply, time: new Date() }
+                { sender: 'bot', text: reply, time: new Date() },
             ])
         } catch (err) {
             console.error(err)
@@ -140,9 +146,13 @@ export default function ChatWidget({ token }) {
     }
 
     const handleClick = e => {
+        // Trigger send
         send()
-        e.currentTarget.classList.add('animate-ripple')
-        setTimeout(() => e.currentTarget.classList.remove('animate-ripple'), 400)
+
+        // Add ripple class safely via ref (no null errors)
+        const btn = sendBtnRef.current
+        btn?.classList.add('animate-ripple')
+        setTimeout(() => btn?.classList.remove('animate-ripple'), 400)
     }
 
     return (
@@ -238,6 +248,7 @@ export default function ChatWidget({ token }) {
             {/* Input */}
             <div className={`mt-4 relative transition-opacity ${loading ? 'opacity-50 pointer-events-none' : ''}`}>
                 <input
+                    ref={inputRef}
                     type="text"
                     placeholder="What’s up?"
                     value={input}
@@ -247,6 +258,7 @@ export default function ChatWidget({ token }) {
                     className="w-full pr-12 pl-4 py-2 rounded-full bg-muted border border-secondary placeholder:text-muted-foreground focus:outline-none"
                 />
                 <button
+                    ref={sendBtnRef}
                     onClick={handleClick}
                     disabled={loading}
                     className="absolute right-4 top-1/2 transform -translate-y-1/2"
