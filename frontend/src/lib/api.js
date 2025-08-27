@@ -1,8 +1,8 @@
 // src/lib/api.js
 // Centralized API client for Praxis Assistant (Vite + fetch).
 // - Attaches Authorization: Bearer <jwt> to every request.
-// - On 401, clears token and routes user to login/paste-JWT.
-// - Exposes helpers for legacy (/history, /chat) and new (/api/chats/*) endpoints.
+// - On 401, clears token and redirects to /401.
+// - Exposes helpers for legacy (/history, /chat) and new (/chats/*) endpoints.
 
 // Base URLs
 const RAW = (import.meta.env.VITE_BACKEND_URL ?? "/api").toString();
@@ -22,7 +22,9 @@ export function clearToken() { setToken(""); }
 
 // Core request
 export async function request(path, { method = "GET", headers = {}, body, raw = false } = {}) {
-    const url = path.startsWith("http") ? path : `${path.startsWith("/auth") ? AUTH_URL : BACKEND_URL}/${path.replace(/^\/+/, "")}`;
+    const url = path.startsWith("http")
+        ? path
+        : `${path.startsWith("/auth") ? AUTH_URL : BACKEND_URL}/${path.replace(/^\/+/, "")}`;
     const token = getToken();
 
     const baseHeaders = {
@@ -40,7 +42,7 @@ export async function request(path, { method = "GET", headers = {}, body, raw = 
 
     if (res.status === 401) {
         clearToken();
-        if (typeof window !== "undefined") window.location.href = "/"; // App.jsx shows the paste-JWT gate
+        if (typeof window !== "undefined") window.location.href = "/401"; // <-- go to Unauthorized page
         throw new Error("Unauthorized");
     }
 
@@ -67,17 +69,17 @@ export function del(path, opts)  { return request(path, { ...opts, method: "DELE
 export function getHistory()         { return get("/history"); }
 export function sendChat(history)    { return post("/chat", { history }); }
 
-// New WhatsApp-style endpoints (ready when you switch UI)
-export function listChats()                          { return get("/api/chats"); }
-export function createChat(title)                    { return post("/api/chats", title ? { title } : {}); }
+// New WhatsApp-style endpoints (fixed: avoid /api/api/*)
+export function listChats()                          { return get("/chats"); }
+export function createChat(title)                    { return post("/chats", title ? { title } : {}); }
 export function getMessages(chatId, { limit = 50, before } = {}) {
     const q = new URLSearchParams();
     if (limit) q.set("limit", String(limit));
     if (before) q.set("before", before);
-    return get(`/api/chats/${chatId}/messages?${q.toString()}`);
+    return get(`/chats/${chatId}/messages?${q.toString()}`);
 }
-export function sendMessage(chatId, content)         { return post(`/api/chats/${chatId}/messages`, { content }); }
-export function archiveChat(chatId)                  { return del(`/api/chats/${chatId}`); }
+export function sendMessage(chatId, content)         { return post(`/chats/${chatId}/messages`, { content }); }
+export function archiveChat(chatId)                  { return del(`/chats/${chatId}`); }
 
 const api = {
     BACKEND_URL,

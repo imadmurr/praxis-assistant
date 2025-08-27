@@ -1,6 +1,7 @@
 import React, {useEffect, useState} from 'react'
 import { Sun, Moon } from 'lucide-react'
 import ChatWidget from './components/ChatWidget'
+import Error401 from './components/Error401'
 import './index.css'
 
 // Persist token in localStorage; also accept ?jwt=<token> once
@@ -61,6 +62,12 @@ export default function App() {
         document.documentElement.classList.toggle('dark', dark)
         localStorage.theme = dark ? 'dark' : 'light'
     }, [dark])
+
+    // Minimal “routing” for the 401 page without react-router
+    const isUnauthorizedPath = typeof window !== 'undefined' && window.location.pathname === '/401'
+    if (isUnauthorizedPath) {
+        return <Error401 />
+    }
 
     return (
         <div className="p-8 bg-background dark:bg-background text-foreground min-h-screen flex flex-col items-center">
