@@ -125,4 +125,4 @@ def healthz():
     return jsonify({"ok": True}), 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=os.getenv("FLASK_DEBUG", "0") == "1")
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5003")), debug=os.getenv("FLASK_DEBUG", "0") == "1")

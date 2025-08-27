@@ -19,7 +19,7 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api/, ''), // -> /chat
       },
 
-      // New endpoints live under /api on the backend already
+      // New WhatsApp-style endpoints live under /api on the backend already
       '/api/chats': {
         target: 'http://localhost:5003',
         changeOrigin: true,

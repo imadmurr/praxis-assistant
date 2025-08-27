@@ -1,83 +1,45 @@
-# Praxis Assistant Monorepo
+## Quick Start (Dev)
 
-This repository contains both the **frontend** (React + Vite + TailwindCSS) and **backend** (Flask + Google Gemini + JWT + FAISS RAG) services for the Praxis AI Assistant.
+### Prereqs
+- Node 20+, Python 3.11+, MongoDB 7.x running on localhost:27017 (or update MONGO_URL)
 
-## 📁 Repository Structure
+### 1) Backend (port 5003)
+export JWT_SECRET_KEY='devsecret'
+export MONGO_URL='mongodb://localhost:27017/praxis_assistant'
+python app.py  # or: gunicorn --bind 0.0.0.0:5003 app:app
 
-```
-/ (root)
-├─ frontend/                   # React chat widget & login UI
-│  ├─ .gitignore               # Node & build ignores
-│  ├─ package.json             # Frontend dependencies & scripts
-│  ├─ postcss.config.js        # PostCSS & Tailwind setup
-│  ├─ tailwind.config.js       # Tailwind configuration
-│  ├─ vite.config.js           # Dev server and proxy settings
-│  └─ src/
-│     ├─ assets/               # Static images, icons, etc.
-│     ├─ components/
-│     │  ├─ ChatWidget.jsx     # Main chat interface
-│     │  └─ LoginForm.jsx      # JWT-based login form
-│     ├─ App.jsx               # Root component (theme toggle & auth)
-│     ├─ index.css             # Tailwind directives & global overrides
-│     └─ main.jsx              # App entry point
-│
-├─ backend/                    # Flask + Gemini + FAISS + JWT microservice
-│  ├─ .gitignore               # Python & env ignores
-│  ├─ requirements.txt         # Python dependencies
-│  ├─ app.py                   # Flask application (login & chat endpoints)
-│  ├─ jwt_utils.py             # JWT creation & verification
-│  └─ retrieval.py             # FAISS index loader & RAG retriever
-│
-└─ README.md                   # Project overview and setup instructions
-```
-
-## 📋 Prerequisites
-
-* **Node.js** (v16+) and **npm** for frontend
-* **Python** (3.9+) and **pip** for backend
-
-## 🔧 Environment Variables
-
-Copy `/backend/.env.example` to `/backend/.env` and set:
-
-```
-GEMINI_API_KEY=YOUR_GOOGLE_GEMINI_API_KEY
-JWT_SECRET_KEY=YOUR_RANDOM_SECRET_KEY
-JWT_ALGORITHM=HS256
-```
-
-> **Testing:** Use the provided sample secret key for jwt: `f9b6SK88Ka0YqKEz0iSGe2Y3Kqzv0QwVcfdufru2r2o=`
-
-## 🏃‍♀️ Running Locally
-
-### Backend
-
-```bash
-cd backend
-pip install -r requirements.txt
-python app.py
-```
-
-* Runs at [http://localhost:5000](http://localhost:5000)
-* Endpoints:
-
-  * `POST /login` → returns `{ token }`
-  * `POST /chat` (requires `Authorization: Bearer <token>`) → returns `{ reply }`
-
-### Frontend
-
-```bash
-cd frontend
+### 2) Frontend (port 3000)
+# vite.config.js proxies /api/history -> http://localhost:5003/history, /api/chat -> .../chat
 npm install
 npm run dev
-```
+# open http://localhost:3000
 
-* Runs at [http://localhost:3000](http://localhost:3000)
-* Proxies `/login` and `/chat` to the Flask backend
+### 3) Test
+- Paste a JWT (HS256; sub=user id) in the UI gate.
+- You should see history load and be able to chat.
 
-## 📑 Usage
+## Quick Start (Docker)
 
-1. Start backend and frontend.
-2. In the browser, login with any username.
-3. Chat with the assistant; JWT is sent in each request header.
-4. Chat history persists per user in `sessionStorage`.
+### Build & Run
+docker compose build
+docker compose up -d
+
+### Open
+http://localhost
+
+### Override env (if needed)
+- docker-compose.yml sets:
+  - backend: JWT_SECRET_KEY, MONGO_URL=mongodb://mongo:27017/praxis_assistant
+  - frontend: VITE_BACKEND_URL=/api baked into the build
+
+## Endpoints (legacy UI flow)
+- GET  /history       (Authorization: Bearer <jwt>)
+- POST /chat          (Authorization: Bearer <jwt>; body { history: [{role, content}] })
+- GET  /api/me        (Authorization: Bearer <jwt>)
+
+## Smoke Tests
+TOKEN="<dev_jwt>"
+curl -i http://localhost/api/me -H "Authorization: Bearer $TOKEN"
+curl -i http://localhost/api/history -H "Authorization: Bearer $TOKEN"
+curl -i http://localhost/api/chat -H "Authorization: Bearer $TOKEN" \
+-H "Content-Type: application/json" --data '{"history":[{"role":"user","content":"hello"}]}'
