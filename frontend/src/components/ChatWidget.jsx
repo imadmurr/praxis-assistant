@@ -6,7 +6,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { User, MessageSquare, ArrowRight } from 'lucide-react'
 import '../index.css'
-import { BACKEND_URL } from '../lib/api.js'
+import api from '../lib/api.js'
 
 // Helper to decode JWT (without verifying signature) and extract payload
 function parseJwt(token) {
@@ -31,6 +31,8 @@ export default function ChatWidget({ token }) {
     const [input, setInput] = useState('')
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState(null)
+    const [chatId, setChatId] = useState(null)
+    const [usingLegacy, setUsingLegacy] = useState(false)
 
     const endRef = useRef(null)
     const sendBtnRef = useRef(null)
@@ -41,37 +43,64 @@ export default function ChatWidget({ token }) {
         return payload?.sub || 'unknown'
     }, [token])
 
-    // Fetch history when token changes
+    // Initialize chat and load messages
     useEffect(() => {
         if (!token) return
-        setLoading(true)
 
-        fetch(`${BACKEND_URL}/history`, {
-            headers: { Authorization: `Bearer ${token}` },
-        })
-            .then(res => {
-                if (res.status === 401) {
-                    localStorage.removeItem('jwt_token')
-                    window.location.href = '/401' // <-- send to Unauthorized page
-                    return
+        const initializeChat = async () => {
+            setLoading(true)
+            setError(null)
+
+            try {
+                // Try new chats API first
+                const chatsList = await api.listChats()
+
+                let currentChatId = null
+                if (Array.isArray(chatsList) && chatsList.length > 0) {
+                    // Use the most recent chat
+                    currentChatId = chatsList[0].id
+                } else {
+                    // Create a new chat
+                    const newChat = await api.createChat('Default Chat')
+                    currentChatId = newChat.id
                 }
-                if (!res.ok) throw new Error(`Status ${res.status}`)
-                return res.json()
-            })
-            .then(data => {
-                if (!data) return
-                const hist = Array.isArray(data.messages) ? data.messages : []
-                const parsed = hist.map(m => ({
-                    sender: m.sender,
-                    text: m.text,
-                    time: new Date(m.time),
+
+                setChatId(currentChatId)
+                setUsingLegacy(false)
+
+                // Load messages for this chat
+                const messagesData = await api.getMessages(currentChatId)
+                const parsed = messagesData.messages.map(m => ({
+                    sender: m.role === 'user' ? 'user' : 'bot',
+                    text: m.content,
+                    time: new Date(m.createdAt),
                 }))
                 setMessages(parsed)
-            })
-            .catch(err => {
-                console.error('❌ Failed to load history:', err)
-            })
-            .finally(() => setLoading(false))
+
+            } catch (err) {
+                console.warn('⚠️ Chats API unavailable, falling back to legacy:', err)
+
+                // Fallback to legacy API
+                setUsingLegacy(true)
+                try {
+                    const data = await api.getHistory()
+                    const hist = Array.isArray(data.messages) ? data.messages : []
+                    const parsed = hist.map(m => ({
+                        sender: m.sender,
+                        text: m.text,
+                        time: new Date(m.time),
+                    }))
+                    setMessages(parsed)
+                } catch (legacyErr) {
+                    console.error('❌ Failed to load history:', legacyErr)
+                    setError('Failed to load chat history')
+                }
+            } finally {
+                setLoading(false)
+            }
+        }
+
+        initializeChat()
     }, [token])
 
     useEffect(() => {
@@ -97,35 +126,64 @@ export default function ChatWidget({ token }) {
         setLoading(true)
         inputRef.current?.focus()
 
-        const historyPayload = [...messages, userMsg].map(m => ({
-            role: m.sender === 'user' ? 'user' : 'assistant',
-            content: m.text,
-        }))
-
         try {
-            const res = await fetch(`${BACKEND_URL}/chat`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({ history: historyPayload }),
-            })
-            if (res.status === 401) {
-                localStorage.removeItem('jwt_token')
-                window.location.href = '/401' // <-- send to Unauthorized page
-                return
+            let reply = ''
+
+            if (usingLegacy) {
+                // Use legacy API
+                const historyPayload = [...messages, userMsg].map(m => ({
+                    role: m.sender === 'user' ? 'user' : 'assistant',
+                    content: m.text,
+                }))
+
+                const response = await api.sendChat(historyPayload)
+                reply = response.reply
+
+            } else if (chatId) {
+                // Use new chats API
+                const response = await api.sendMessage(chatId, text)
+                reply = response.assistant.content
+            } else {
+                throw new Error('No chat initialized')
             }
-            if (!res.ok) throw new Error(await res.text())
-            const { reply } = await res.json()
 
             setMessages(ms => [
                 ...ms,
                 { sender: 'bot', text: reply, time: new Date() },
             ])
         } catch (err) {
-            console.error(err)
-            setError('⚠️ Oops—something went wrong. Please try again.')
+            console.error('❌ Send failed:', err)
+
+            // If using new API and it fails, try fallback to legacy
+            if (!usingLegacy && chatId) {
+                console.warn('⚠️ Retrying with legacy API...')
+                setUsingLegacy(true)
+                setChatId(null)
+
+                try {
+                    const historyPayload = [...messages, userMsg].map(m => ({
+                        role: m.sender === 'user' ? 'user' : 'assistant',
+                        content: m.text,
+                    }))
+
+                    const response = await api.sendChat(historyPayload)
+                    const reply = response.reply
+
+                    setMessages(ms => [
+                        ...ms,
+                        { sender: 'bot', text: reply, time: new Date() },
+                    ])
+                } catch (legacyErr) {
+                    console.error('❌ Legacy API also failed:', legacyErr)
+                    setError('⚠️ Oops—something went wrong. Please try again.')
+                    // Remove the user message since send failed
+                    setMessages(ms => ms.slice(0, -1))
+                }
+            } else {
+                setError('⚠️ Oops—something went wrong. Please try again.')
+                // Remove the user message since send failed
+                setMessages(ms => ms.slice(0, -1))
+            }
         } finally {
             setLoading(false)
         }
@@ -144,8 +202,13 @@ export default function ChatWidget({ token }) {
 
     return (
         <div className="max-w-md w-full p-6 bg-card rounded-2xl shadow-lg flex flex-col h-[600px]">
-            <div className="mb-3 font-medium text-gray-700">
-                Welcome, <span className="text-primary">{userId}</span>!
+            <div className="mb-3 font-medium text-gray-700 flex justify-between items-center">
+                <span>Welcome, <span className="text-primary">{userId}</span>!</span>
+                {process.env.NODE_ENV === 'development' && (
+                    <span className="text-xs text-gray-500">
+                        {usingLegacy ? '(legacy)' : '(chats API)'}
+                    </span>
+                )}
             </div>
 
             {error && (
@@ -225,7 +288,7 @@ export default function ChatWidget({ token }) {
                 <input
                     ref={inputRef}
                     type="text"
-                    placeholder="What’s up?"
+                    placeholder="What's up?"
                     value={input}
                     onChange={e => setInput(e.target.value)}
                     onKeyDown={onKey}
