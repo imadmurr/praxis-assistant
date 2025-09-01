@@ -31,23 +31,25 @@ function useJwtToken() {
 function JwtGate({ onSet }) {
     const [val, setVal] = useState('')
     return (
-        <div className="w-full max-w-xs mx-auto mt-24 p-8 bg-white rounded-2xl shadow space-y-4 border">
-            <h2 className="text-lg font-semibold mb-2">JWT required</h2>
-            <input
-                className="w-full border rounded px-3 py-2"
-                value={val}
-                onChange={e => setVal(e.target.value)}
-                placeholder="Paste your JWT"
-                autoFocus
-            />
-            <button
-                onClick={() => val && onSet(val)}
-                className="w-full bg-blue-600 text-white rounded py-2 font-bold mt-2"
-            >Use token</button>
-            <details className="text-sm opacity-80">
-                <summary>Quick test without UI</summary>
-                <pre className="mt-2 p-2 bg-gray-100 rounded">{`localStorage.setItem('jwt_token','<token>'); location.reload();`}</pre>
-            </details>
+        <div className="w-full h-full flex items-center justify-center">
+            <div className="w-full max-w-xs p-8 bg-white rounded-2xl shadow space-y-4 border">
+                <h2 className="text-lg font-semibold mb-2">JWT required</h2>
+                <input
+                    className="w-full border rounded px-3 py-2"
+                    value={val}
+                    onChange={e => setVal(e.target.value)}
+                    placeholder="Paste your JWT"
+                    autoFocus
+                />
+                <button
+                    onClick={() => val && onSet(val)}
+                    className="w-full bg-blue-600 text-white rounded py-2 font-bold mt-2"
+                >Use token</button>
+                <details className="text-sm opacity-80">
+                    <summary>Quick test without UI</summary>
+                    <pre className="mt-2 p-2 bg-gray-100 rounded">{`localStorage.setItem('jwt_token','<token>'); location.reload();`}</pre>
+                </details>
+            </div>
         </div>
     )
 }
@@ -69,12 +71,13 @@ export default function App() {
         return <Error401 />
     }
 
+    // Full-viewport canvas (fills the iframe)
     return (
-        <div className="p-8 bg-background dark:bg-background text-foreground min-h-screen flex flex-col items-center">
-            {/* Top bar: Theme toggle (left) + Logout (right) */}
-            <div className="w-full flex justify-between items-center mb-6">
+        <div className="h-screen w-screen bg-background dark:bg-background text-foreground flex flex-col min-h-0">
+            {/* Top bar */}
+            <div className="w-full flex items-center justify-between px-3 sm:px-4 py-2 border-b">
                 <button onClick={() => setDark(d => !d)}>
-                    {dark ? <Sun size={24} className="text-primary"/> : <Moon size={24} className="text-primary"/>}
+                    {dark ? <Sun size={22} className="text-primary"/> : <Moon size={22} className="text-primary"/>}
                 </button>
                 {token && (
                     <button
@@ -86,7 +89,10 @@ export default function App() {
                 )}
             </div>
 
-            {token ? <ChatWidget token={token}/> : <JwtGate onSet={setToken} />}
+            {/* Chat region takes the rest */}
+            <div className="flex-1 min-h-0 w-full">
+                {token ? <ChatWidget token={token}/> : <JwtGate onSet={setToken} />}
+            </div>
         </div>
     )
 }

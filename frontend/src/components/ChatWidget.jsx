@@ -57,10 +57,8 @@ export default function ChatWidget({ token }) {
 
                 let currentChatId = null
                 if (Array.isArray(chatsList) && chatsList.length > 0) {
-                    // Use the most recent chat
                     currentChatId = chatsList[0].id
                 } else {
-                    // Create a new chat
                     const newChat = await api.createChat('Default Chat')
                     currentChatId = newChat.id
                 }
@@ -80,7 +78,6 @@ export default function ChatWidget({ token }) {
             } catch (err) {
                 console.warn('⚠️ Chats API unavailable, falling back to legacy:', err)
 
-                // Fallback to legacy API
                 setUsingLegacy(true)
                 try {
                     const data = await api.getHistory()
@@ -130,7 +127,6 @@ export default function ChatWidget({ token }) {
             let reply = ''
 
             if (usingLegacy) {
-                // Use legacy API
                 const historyPayload = [...messages, userMsg].map(m => ({
                     role: m.sender === 'user' ? 'user' : 'assistant',
                     content: m.text,
@@ -140,7 +136,6 @@ export default function ChatWidget({ token }) {
                 reply = response.reply
 
             } else if (chatId) {
-                // Use new chats API
                 const response = await api.sendMessage(chatId, text)
                 reply = response.assistant.content
             } else {
@@ -154,7 +149,6 @@ export default function ChatWidget({ token }) {
         } catch (err) {
             console.error('❌ Send failed:', err)
 
-            // If using new API and it fails, try fallback to legacy
             if (!usingLegacy && chatId) {
                 console.warn('⚠️ Retrying with legacy API...')
                 setUsingLegacy(true)
@@ -176,12 +170,10 @@ export default function ChatWidget({ token }) {
                 } catch (legacyErr) {
                     console.error('❌ Legacy API also failed:', legacyErr)
                     setError('⚠️ Oops—something went wrong. Please try again.')
-                    // Remove the user message since send failed
                     setMessages(ms => ms.slice(0, -1))
                 }
             } else {
                 setError('⚠️ Oops—something went wrong. Please try again.')
-                // Remove the user message since send failed
                 setMessages(ms => ms.slice(0, -1))
             }
         } finally {
@@ -201,14 +193,10 @@ export default function ChatWidget({ token }) {
     }
 
     return (
-        <div className="max-w-md w-full p-6 bg-card rounded-2xl shadow-lg flex flex-col h-[600px]">
+        // Fill parent area entirely
+        <div className="w-full h-full p-4 sm:p-6 bg-card rounded-none shadow-none flex flex-col overflow-hidden">
             <div className="mb-3 font-medium text-gray-700 flex justify-between items-center">
                 <span>Welcome, <span className="text-primary">{userId}</span>!</span>
-                {process.env.NODE_ENV === 'development' && (
-                    <span className="text-xs text-gray-500">
-                        {usingLegacy ? '(legacy)' : '(chats API)'}
-                    </span>
-                )}
             </div>
 
             {error && (
@@ -220,14 +208,15 @@ export default function ChatWidget({ token }) {
                 </div>
             )}
 
-            <div className="flex-1 overflow-y-auto space-y-4 pr-6">
+            {/* Scrollable messages area */}
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-2 sm:pr-6">
                 {messages.length === 0 && !loading && (
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         className="flex flex-col items-start"
                     >
-                        <div className="prose prose-sm max-w-[85%] p-3 rounded-2xl bg-card text-foreground">
+                        <div className="prose prose-sm max-w-[95%] sm:max-w-[85%] p-3 rounded-2xl bg-card text-foreground">
                             👋 Hello! How can I assist you with Praxis ERP today?
                         </div>
                     </motion.div>
@@ -252,7 +241,7 @@ export default function ChatWidget({ token }) {
                                 {m.sender === 'user' ? <User size={16} /> : <MessageSquare size={16} />}
                             </div>
                             <div
-                                className={`prose prose-sm max-w-[85%] p-3 rounded-2xl ${
+                                className={`prose prose-sm max-w-[95%] sm:max-w-[85%] p-3 rounded-2xl ${
                                     m.sender === 'user' ? 'bg-muted text-foreground' : 'bg-card text-foreground'
                                 }`}
                             >
@@ -284,7 +273,8 @@ export default function ChatWidget({ token }) {
                 <div ref={endRef} />
             </div>
 
-            <div className={`mt-4 relative transition-opacity ${loading ? 'opacity-50 pointer-events-none' : ''}`}>
+            {/* Composer pinned to bottom */}
+            <div className={`mt-4 relative shrink-0 transition-opacity ${loading ? 'opacity-50 pointer-events-none' : ''}`}>
                 <input
                     ref={inputRef}
                     type="text"
